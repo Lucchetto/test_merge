@@ -1,0 +1,64 @@
+name: Merge Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_branch:
+        description: 'Name of the release branch to merge'
+        required: true
+        default: 'release'
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  merge-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if release branch exists
+        run: |
+          if ! git ls-remote --exit-code --heads origin ${{ github.event.inputs.release_branch }}; then
+            echo "❌ Branch ${{ github.event.inputs.release_branch }} does not exist — aborting."
+            exit 1
+          fi
+
+      - name: Get release tag name
+        id: get_version
+        run: |
+          TAG_NAME=$(git tag --points-at origin/${{ github.event.inputs.release_branch }} | head -n 1)
+          if [ -z "$TAG_NAME" ]; then
+            echo "No tag found on ${{ github.event.inputs.release_branch }}!"
+            exit 1
+          fi
+          echo "version=$TAG_NAME" >> $GITHUB_OUTPUT
+          echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
+
+      - name: Set up Git user
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Merge release into development
+        run: |
+          git checkout origin/development
+          git switch -C development
+          git merge origin/${{ github.event.inputs.release_branch }} --no-ff -m "Merge ${{ env.TAG_NAME }} into development"
+          git push origin development
+
+      - name: Merge release into master
+        run: |
+          git checkout origin/master
+          git switch -C master
+          git merge origin/${{ github.event.inputs.release_branch }} --no-ff -m "Merge ${{ env.TAG_NAME }} into master"
+          git push origin master
+
+      - name: Delete release branch
+        run: |
+          git push origin --delete ${{ github.event.inputs.release_branch }}
